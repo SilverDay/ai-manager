@@ -1,0 +1,110 @@
+version: '3.8'
+
+services:
+  mariadb:
+    image: mariadb:10.11
+    container_name: aigov-db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root_secure_password
+      MYSQL_DATABASE: aigov
+      MYSQL_USER: aigov_user
+      MYSQL_PASSWORD: '[jxm!0O5M6f7RziQ'  # Matches .env
+    ports:
+      - "3306:3306"
+    volumes:
+      - ./docker-data/mariadb:/var/lib/mysql
+      - ./backend/migrations:/docker-entrypoint-initdb.d:ro
+    command: >
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+      --default-authentication-plugin=mysql_native_password
+      --innodb-buffer-pool-size=256M
+    networks:
+      - aigov-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "aigov_user", "-p[jxm!0O5M6f7RziQ"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  backend:
+    build:
+      context: ./docker/php
+      dockerfile: Dockerfile
+    container_name: aigov-backend
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    volumes:
+      - ./backend:/var/www/html
+      - ./storage:/var/app/storage
+      - ./docker/apache/vhost.conf:/etc/apache2/sites-available/000-default.conf
+    environment:
+      APACHE_DOCUMENT_ROOT: /var/www/html/public
+      PHP_MEMORY_LIMIT: 256M
+      PHP_MAX_EXECUTION_TIME: 30
+      PHP_POST_MAX_SIZE: 50M
+      PHP_UPLOAD_MAX_FILESIZE: 50M
+    env_file:
+      - .env
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    networks:
+      - aigov-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  frontend:
+    image: node:20-alpine
+    container_name: aigov-frontend
+    restart: unless-stopped
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules  # Anonymous volume for node_modules
+    working_dir: /app
+    environment:
+      - NODE_ENV=development
+    command: sh -c "npm ci && npm run dev -- --host 0.0.0.0"
+    networks:
+      - aigov-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:5173"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: aigov-mail
+    restart: unless-stopped
+    ports:
+      - "1025:1025"  # SMTP
+      - "8025:8025"  # Web UI
+    networks:
+      - aigov-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8025"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  aigov-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+volumes:
+  mariadb-data:
+    driver: local

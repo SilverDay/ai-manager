@@ -1,0 +1,41 @@
+{
+  "name": "aigov-platform-frontend",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "lint": "eslint . --ext .vue,.js,.jsx,.ts,.tsx --fix",
+    "lint:check": "eslint . --ext .vue,.js,.jsx,.ts,.tsx",
+    "format": "prettier --write .",
+    "security:audit": "npm audit --audit-level=moderate",
+    "security:audit-fix": "npm audit fix",
+    "security:check": "npm audit --audit-level=high --production",
+    "deps:check": "npx depcheck",
+    "deps:outdated": "npm outdated",
+    "test:unit": "vitest",
+    "precommit": "npm run lint:check && npm run security:check"
+  },
+  "dependencies": {
+    "vue": "^3.4.27",
+    "vue-router": "^4.3.2",
+    "pinia": "^2.1.7",
+    "vue-i18n": "^9.13.1",
+    "axios": "^1.7.2"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.0.4",
+    "vite": "^5.2.11",
+    "tailwindcss": "^3.4.3",
+    "autoprefixer": "^10.4.19",
+    "postcss": "^8.4.38",
+    "eslint": "^8.57.0",
+    "eslint-plugin-vue": "^9.26.0",
+    "@vue/eslint-config-prettier": "^9.0.0",
+    "prettier": "^3.2.5",
+    "vitest": "^1.6.0",
+    "@vue/test-utils": "^2.4.6"
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Read files in project directory",
+      "Write files in project directory",
+      "Execute npm and composer commands",
+      "Execute php scripts/migrate.php",
+      "Execute php scripts/seed.php",
+      "Execute phpunit",
+      "Execute vitest",
+      "Execute git commands"
+    ],
+    "deny": [
+      "Execute rm -rf on project root",
+      "Modify .env files (suggest changes only)",
+      "Access production databases",
+      "Execute curl to external URLs without confirmation"
+    ]
+  },
+  "model": "claude-sonnet-4-20250514"
+}

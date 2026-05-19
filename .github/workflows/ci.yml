@@ -1,0 +1,181 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  detect-changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    outputs:
+      frontend: ${{ steps.changes.outputs.frontend }}
+      backend: ${{ steps.changes.outputs.backend }}
+      docs: ${{ steps.changes.outputs.docs }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Detect changes
+        uses: dorny/paths-filter@v2
+        id: changes
+        with:
+          filters: |
+            frontend:
+              - 'frontend/**'
+            backend:
+              - 'backend/**'
+              - 'scripts/**'
+            docs:
+              - 'docs/**'
+              - '*.md'
+              - 'CLAUDE.md'
+
+  project-health:
+    name: Project Health Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check project structure
+        run: |
+          echo "Checking project structure..."
+
+          # Required directories
+          required_dirs=("frontend" "backend" "docs" "scripts" ".github/workflows")
+          for dir in "${required_dirs[@]}"; do
+            if [ ! -d "$dir" ]; then
+              echo "ERROR: Required directory missing: $dir"
+              exit 1
+            fi
+          done
+
+          # Required files
+          required_files=("README.md" "CLAUDE.md" "backend/composer.json" "frontend/package.json")
+          for file in "${required_files[@]}"; do
+            if [ ! -f "$file" ]; then
+              echo "WARNING: Expected file missing: $file"
+            fi
+          done
+
+          echo "✅ Project structure check passed"
+
+      - name: Check for sensitive files
+        run: |
+          echo "Scanning for sensitive files that shouldn't be committed..."
+
+          # Files that should never be committed
+          sensitive_patterns=(".env" "*.key" "*.pem" "*.p12" "*.pfx" "id_rsa" "id_dsa")
+          found_sensitive=false
+
+          for pattern in "${sensitive_patterns[@]}"; do
+            if find . -name "$pattern" -not -path "./.git/*" | grep -q .; then
+              echo "WARNING: Potentially sensitive files found matching pattern: $pattern"
+              find . -name "$pattern" -not -path "./.git/*"
+              found_sensitive=true
+            fi
+          done
+
+          if [ "$found_sensitive" = true ]; then
+            echo "Please review the files above and ensure they don't contain secrets"
+            # Don't fail CI for this, just warn
+          else
+            echo "✅ No obviously sensitive files found"
+          fi
+
+      - name: Check for large files
+        run: |
+          echo "Checking for large files (>10MB)..."
+          large_files=$(find . -type f -size +10M -not -path "./.git/*" 2>/dev/null || true)
+          if [ -n "$large_files" ]; then
+            echo "WARNING: Large files found (>10MB):"
+            echo "$large_files"
+            echo "Consider using Git LFS for large files"
+          else
+            echo "✅ No large files found"
+          fi
+
+  frontend-gate:
+    name: Frontend Gate
+    needs: detect-changes
+    if: needs.detect-changes.outputs.frontend == 'true'
+    uses: ./.github/workflows/frontend.yml
+
+  backend-gate:
+    name: Backend Gate
+    needs: detect-changes
+    if: needs.detect-changes.outputs.backend == 'true'
+    uses: ./.github/workflows/backend.yml
+
+  documentation:
+    name: Documentation Check
+    needs: detect-changes
+    if: needs.detect-changes.outputs.docs == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check Markdown files
+        run: |
+          echo "Checking Markdown files for basic issues..."
+
+          # Check for broken internal links (basic check)
+          find docs/ -name "*.md" -exec grep -l "](\./" {} \; | while read -r file; do
+            echo "Checking internal links in $file"
+            grep -n "](\./" "$file" | while IFS=: read -r line_num link_line; do
+              # Extract the link path
+              link_path=$(echo "$link_line" | sed -n 's/.*](\.\([^)]*\)).*/\1/p')
+              if [ -n "$link_path" ] && [ ! -f "docs$link_path" ] && [ ! -f "$link_path" ]; then
+                echo "WARNING: Potential broken link in $file:$line_num -> $link_path"
+              fi
+            done
+          done
+
+      - name: Validate CLAUDE.md format
+        run: |
+          if [ -f CLAUDE.md ]; then
+            echo "✅ CLAUDE.md present"
+
+            # Basic validation
+            if ! grep -q "^# " CLAUDE.md; then
+              echo "WARNING: CLAUDE.md should start with a top-level heading"
+            fi
+          else
+            echo "WARNING: CLAUDE.md not found"
+          fi
+
+  all-checks-complete:
+    name: All Checks Complete
+    if: always()
+    needs: [project-health, frontend-gate, backend-gate, documentation]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check all job statuses
+        run: |
+          echo "Job status summary:"
+          echo "Project Health: ${{ needs.project-health.result }}"
+          echo "Frontend Gate: ${{ needs.frontend-gate.result }}"
+          echo "Backend Gate: ${{ needs.backend-gate.result }}"
+          echo "Documentation: ${{ needs.documentation.result }}"
+
+          # Check if any required job failed
+          if [[ "${{ needs.project-health.result }}" == "failure" ]]; then
+            echo "❌ Project health check failed"
+            exit 1
+          fi
+
+          if [[ "${{ needs.frontend-gate.result }}" == "failure" ]]; then
+            echo "❌ Frontend checks failed"
+            exit 1
+          fi
+
+          if [[ "${{ needs.backend-gate.result }}" == "failure" ]]; then
+            echo "❌ Backend checks failed"
+            exit 1
+          fi
+
+          echo "✅ All applicable checks passed"

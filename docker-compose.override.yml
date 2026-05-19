@@ -1,0 +1,43 @@
+# Docker Compose overrides for local development
+# This file is automatically loaded by docker-compose
+
+version: '3.8'
+
+services:
+  backend:
+    environment:
+      # Override for local development
+      - APP_ENV=development
+      - APP_DEBUG=true
+    volumes:
+      # Mount source code for live reloading
+      - ./backend:/var/www/html:delegated
+      - ./storage:/var/app/storage:delegated
+
+  frontend:
+    environment:
+      # Development-specific environment variables
+      - NODE_ENV=development
+      - VITE_API_BASE_URL=http://localhost:8080
+    volumes:
+      # Mount source code for live reloading
+      - ./frontend:/app:delegated
+      # Use anonymous volume for node_modules to improve performance
+      - /app/node_modules
+
+  mariadb:
+    ports:
+      # Expose database port for external tools (e.g., database GUI clients)
+      - "3306:3306"
+    environment:
+      # Development database settings
+      - MYSQL_ROOT_PASSWORD=dev_root_password
+    volumes:
+      # Add init scripts directory
+      - ./docker/mysql/init:/docker-entrypoint-initdb.d:ro
+
+  mailhog:
+    # MailHog for development email testing
+    ports:
+      - "1025:1025"  # SMTP
+      - "8025:8025"  # Web UI at http://localhost:8025

@@ -1,0 +1,65 @@
+{
+  "common": {
+    "home": "Home",
+    "dashboard": "Dashboard",
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "edit": "Edit",
+    "create": "Create",
+    "update": "Update",
+    "loading": "Loading...",
+    "error": "Error",
+    "success": "Success",
+    "warning": "Warning",
+    "info": "Information",
+    "confirm": "Confirm",
+    "yes": "Yes",
+    "no": "No",
+    "close": "Close",
+    "back": "Back",
+    "next": "Next",
+    "previous": "Previous",
+    "search": "Search",
+    "filter": "Filter",
+    "reset": "Reset",
+    "submit": "Submit"
+  },
+  "auth": {
+    "login": "Log in",
+    "logout": "Log out",
+    "register": "Register",
+    "email": "Email",
+    "password": "Password",
+    "forgotPassword": "Forgot Password",
+    "resetPassword": "Reset Password",
+    "loginTitle": "Sign in to your account",
+    "loginSubtitle": "Welcome back to AI Governance Platform",
+    "rememberMe": "Remember me"
+  },
+  "dashboard": {
+    "title": "Dashboard",
+    "welcome": "Welcome to AI Governance Platform",
+    "aiSystems": "AI Systems",
+    "riskAssessments": "Risk Assessments",
+    "approvalsPending": "Pending Approvals",
+    "recentActivity": "Recent Activity"
+  },
+  "aiSystems": {
+    "title": "AI Systems",
+    "addNew": "Register AI System",
+    "name": "System Name",
+    "description": "Description",
+    "status": "Status",
+    "classification": "Classification",
+    "riskLevel": "Risk Level"
+  },
+  "errors": {
+    "generic": "An unexpected error occurred. Please try again.",
+    "network": "Network error. Please check your connection.",
+    "unauthorized": "You are not authorized to perform this action.",
+    "forbidden": "Access denied.",
+    "notFound": "The requested resource was not found.",
+    "validation": "Please check your input and try again."
+  }
+}
