@@ -1,0 +1,15 @@
+RewriteEngine On
+
+# Handle API routes and backend requests
+RewriteCond %{REQUEST_URI} ^/(api|health|status|metrics)
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteRule ^(.*)$ index.php [QSA,L]
+
+# Serve static frontend assets directly
+RewriteCond %{REQUEST_FILENAME} -f
+RewriteRule ^.*$ - [L]
+
+# Everything else goes to the frontend (Vue router)
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^.*$ index.html [L]

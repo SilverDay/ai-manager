@@ -1,0 +1,9 @@
+RewriteEngine On
+
+# Serve frontend assets from frontend/dist
+RewriteRule ^(assets/.*|index\.html)$ frontend/dist/$1 [L]
+
+# Forward API routes and other requests to backend
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^(.*)$ index.php [QSA,L]
