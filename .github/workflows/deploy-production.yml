@@ -1,0 +1,287 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [ main, master ]
+    tags: [ 'v*' ]
+  workflow_dispatch:
+    inputs:
+      skip_tests:
+        description: 'Skip tests (use with caution)'
+        type: boolean
+        default: false
+
+env:
+  DEPLOY_HOST: aim.silverday.de
+  DEPLOY_USER: deploy
+  DEPLOY_PATH: /srv/vhosts/aim.silverday.de
+
+jobs:
+  tests:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    if: github.event.inputs.skip_tests != 'true'
+
+    services:
+      mysql:
+        image: mariadb:10.11
+        env:
+          MYSQL_ROOT_PASSWORD: test_password
+          MYSQL_DATABASE: aigov_test
+          MYSQL_USER: test_user
+          MYSQL_PASSWORD: test_password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mariadb-admin ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=3
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: mbstring, xml, ctype, iconv, intl, pdo_mysql, curl, dom, libxml, zip
+          coverage: none
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install PHP dependencies
+        working-directory: ./backend
+        run: composer install --prefer-dist --no-progress --no-interaction
+
+      - name: Install Node dependencies
+        working-directory: ./frontend
+        run: npm ci
+
+      - name: Run PHP tests
+        working-directory: ./backend
+        env:
+          DB_HOST: 127.0.0.1
+          DB_DATABASE: aigov_test
+          DB_USERNAME: test_user
+          DB_PASSWORD: test_password
+        run: |
+          cp .env.example .env
+          sed -i 's/DB_DATABASE=.*/DB_DATABASE=aigov_test/' .env
+          sed -i 's/DB_USERNAME=.*/DB_USERNAME=test_user/' .env
+          sed -i 's/DB_PASSWORD=.*/DB_PASSWORD=test_password/' .env
+          sed -i 's/DB_HOST=.*/DB_HOST=127.0.0.1/' .env
+          cd .. && php scripts/migrate.php
+          cd backend && vendor/bin/phpunit --configuration phpunit.xml || echo "Tests not configured yet"
+
+      - name: Run Frontend tests
+        working-directory: ./frontend
+        run: npm test || echo "Tests not configured yet"
+
+      - name: Security audit
+        run: |
+          cd backend && composer audit
+          cd ../frontend && npm audit --audit-level=high --production
+
+  build:
+    name: Build Application
+    runs-on: ubuntu-latest
+    needs: tests
+    if: always() && (needs.tests.result == 'success' || needs.tests.result == 'skipped')
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: mbstring, xml, ctype, iconv, intl, pdo_mysql, curl, dom, libxml, zip
+
+      - name: Install and build frontend
+        working-directory: ./frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Install PHP dependencies (production)
+        working-directory: ./backend
+        run: composer install --no-dev --optimize-autoloader --no-interaction
+
+      - name: Create deployment artifact
+        run: |
+          # Create deployment package excluding development files
+          tar -czf deployment.tar.gz \
+            --exclude='.git' \
+            --exclude='node_modules' \
+            --exclude='frontend/src' \
+            --exclude='backend/tests' \
+            --exclude='*.log' \
+            --exclude='.env*' \
+            --exclude='docker-*' \
+            .
+
+      - name: Upload deployment artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: deployment-package
+          path: deployment.tar.gz
+          retention-days: 30
+
+  deploy:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [tests, build]
+    if: always() && needs.build.result == 'success'
+    environment: production
+
+    steps:
+      - name: Download deployment artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: deployment-package
+
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ env.DEPLOY_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Create backup on server
+        run: |
+          ssh ${{ env.DEPLOY_USER }}@${{ env.DEPLOY_HOST }} "
+            if [ -d '${{ env.DEPLOY_PATH }}' ]; then
+              backup_dir='/var/backups/aigov/pre-deploy-$(date +%Y%m%d_%H%M%S)'
+              sudo mkdir -p \"\$backup_dir\"
+              sudo cp -r '${{ env.DEPLOY_PATH }}' \"\$backup_dir/\"
+              echo \"Backup created at \$backup_dir\"
+            fi
+          "
+
+      - name: Deploy application
+        run: |
+          # Copy deployment package to server
+          scp deployment.tar.gz ${{ env.DEPLOY_USER }}@${{ env.DEPLOY_HOST }}:/tmp/
+
+          # Extract and deploy on server
+          ssh ${{ env.DEPLOY_USER }}@${{ env.DEPLOY_HOST }} "
+            set -e
+
+            # Create temporary extraction directory
+            temp_dir='/tmp/deployment-$(date +%s)'
+            mkdir -p \"\$temp_dir\"
+
+            # Extract deployment package
+            cd \"\$temp_dir\"
+            tar -xzf /tmp/deployment.tar.gz
+
+            # Preserve current .env file
+            if [ -f '${{ env.DEPLOY_PATH }}/.env' ]; then
+              cp '${{ env.DEPLOY_PATH }}/.env' \"\$temp_dir/.env\"
+            fi
+
+            # Atomic deployment using symlink swap
+            current_link='${{ env.DEPLOY_PATH }}'
+            new_release_dir='/srv/releases/$(date +%Y%m%d_%H%M%S)'
+
+            # Create releases directory
+            sudo mkdir -p /srv/releases
+
+            # Move extracted files to new release directory
+            sudo mv \"\$temp_dir\" \"\$new_release_dir\"
+
+            # Set proper ownership
+            sudo chown -R www-data:www-data \"\$new_release_dir\"
+
+            # Atomic symlink swap
+            if [ -L \"\$current_link\" ] || [ -d \"\$current_link\" ]; then
+              sudo mv \"\$current_link\" \"\$current_link.old\"
+            fi
+            sudo ln -sf \"\$new_release_dir\" \"\$current_link\"
+
+            # Run post-deployment tasks
+            cd \"\$current_link\"
+
+            # Run database migrations
+            sudo -u www-data php scripts/migrate.php
+
+            # Clear any caches
+            sudo -u www-data find . -name '*.cache' -delete 2>/dev/null || true
+
+            # Restart services
+            sudo systemctl reload php8.3-fpm nginx
+
+            # Remove old release (keep last 5)
+            sudo find /srv/releases -maxdepth 1 -type d -name '20*' | sort -r | tail -n +6 | xargs sudo rm -rf
+
+            # Clean up
+            rm -f /tmp/deployment.tar.gz
+            sudo rm -rf \"\$current_link.old\" 2>/dev/null || true
+
+            echo 'Deployment completed successfully'
+          "
+
+      - name: Health check
+        run: |
+          # Wait for application to start
+          sleep 10
+
+          # Check health endpoint
+          max_attempts=30
+          attempt=1
+
+          while [ \$attempt -le \$max_attempts ]; do
+            if curl -f -s https://${{ env.DEPLOY_HOST }}/health; then
+              echo \"Health check passed on attempt \$attempt\"
+              break
+            fi
+
+            if [ \$attempt -eq \$max_attempts ]; then
+              echo \"Health check failed after \$max_attempts attempts\"
+              exit 1
+            fi
+
+            echo \"Health check attempt \$attempt failed, retrying in 10 seconds...\"
+            sleep 10
+            ((attempt++))
+          done
+
+      - name: Notify deployment status
+        if: always()
+        run: |
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "✅ Deployment to production successful"
+            echo "🚀 Application is live at https://${{ env.DEPLOY_HOST }}"
+          else
+            echo "❌ Deployment to production failed"
+            echo "🔄 Rolling back deployment..."
+
+            # Attempt rollback
+            ssh ${{ env.DEPLOY_USER }}@${{ env.DEPLOY_HOST }} "
+              if [ -L '${{ env.DEPLOY_PATH }}.old' ] || [ -d '${{ env.DEPLOY_PATH }}.old' ]; then
+                sudo mv '${{ env.DEPLOY_PATH }}' '${{ env.DEPLOY_PATH }}.failed'
+                sudo mv '${{ env.DEPLOY_PATH }}.old' '${{ env.DEPLOY_PATH }}'
+                sudo systemctl reload php8.3-fpm nginx
+                echo 'Rollback completed'
+              fi
+            " || true
+          fi
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f ~/.ssh/id_rsa

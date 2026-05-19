@@ -179,8 +179,8 @@ final class Router
         $controllerClass = $route->getControllerClass();
         $controllerMethod = $route->getControllerMethod();
 
-        // Instantiate controller and call method
-        $controller = new $controllerClass();
+        // Instantiate controller with dependency injection
+        $controller = $this->instantiateController($controllerClass);
         $response = $controller->{$controllerMethod}($request);
 
         if (!$response instanceof Response) {
@@ -188,6 +188,57 @@ final class Router
         }
 
         return $response;
+    }
+
+    /**
+     * Instantiate controller with dependency injection
+     */
+    private function instantiateController(string $controllerClass): object
+    {
+        // Simple dependency injection for core services
+        $config = Config::getInstance();
+        $database = new Database($config);
+
+        try {
+            $reflector = new \ReflectionClass($controllerClass);
+            $constructor = $reflector->getConstructor();
+
+            if ($constructor === null) {
+                return new $controllerClass();
+            }
+
+            $parameters = $constructor->getParameters();
+            $dependencies = [];
+
+            foreach ($parameters as $parameter) {
+                $type = $parameter->getType();
+
+                if ($type instanceof \ReflectionNamedType) {
+                    $typeName = $type->getName();
+
+                    switch ($typeName) {
+                        case Config::class:
+                        case 'App\Core\Config':
+                            $dependencies[] = $config;
+                            break;
+                        case Database::class:
+                        case 'App\Core\Database':
+                            $dependencies[] = $database;
+                            break;
+                        default:
+                            if (!$parameter->isOptional()) {
+                                throw new \RuntimeException("Cannot resolve dependency: {$typeName}");
+                            }
+                            break;
+                    }
+                }
+            }
+
+            return $reflector->newInstanceArgs($dependencies);
+
+        } catch (\ReflectionException $e) {
+            throw new \RuntimeException("Cannot instantiate controller: {$controllerClass}", 0, $e);
+        }
     }
 
     /**

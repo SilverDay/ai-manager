@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Core;
 
 use App\Controllers\HealthController;
+use App\Controllers\MonitorController;
 
 final class Application
 {
@@ -43,11 +44,16 @@ final class Application
 
     private function registerRoutes(): void
     {
-        // Health check endpoint
-        $this->router->get('/health', [HealthController::class, 'check']);
+        // Health check endpoint (basic)
+        $this->router->get('/health', [MonitorController::class, 'health']);
 
         // API v1 routes will be added in subsequent work packages
         $this->router->get('/api/v1/health', [HealthController::class, 'check']);
+
+        // Production monitoring endpoints
+        $this->router->get('/status', [MonitorController::class, 'status']);
+        $this->router->get('/metrics', [MonitorController::class, 'metrics']);
+        $this->router->get('/security-status', [MonitorController::class, 'securityStatus']);
 
         // Test route with parameters (for router testing)
         $this->router->get('/api/v1/test/{id}', [HealthController::class, 'test']);
