@@ -7,8 +7,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-BACKUP_BASE_DIR="/var/backups/aigov"
-LOG_FILE="/var/log/aigov/backup.log"
+BACKUP_BASE_DIR="${PROJECT_ROOT}/storage/backups"
+LOG_FILE="${PROJECT_ROOT}/storage/logs/backup.log"
 RETENTION_DAYS=30
 
 # Colors for output
@@ -135,9 +135,9 @@ backup_files() {
     log "INFO" "Starting file backup..."
 
     # Backup uploaded documents
-    if [[ -d "/var/app/storage/documents" ]]; then
+    if [[ -d "${PROJECT_ROOT}/storage/documents" ]]; then
         tar -czf "${BACKUP_DIR}/files/documents.tar.gz" \
-            -C "/var/app/storage" documents/
+            -C "${PROJECT_ROOT}/storage" documents/
         log "SUCCESS" "Documents backup completed"
     fi
 
@@ -152,11 +152,8 @@ backup_files() {
         cp "/etc/php/8.3/fpm/pool.d/aigov.conf" "${BACKUP_DIR}/config/php-fpm.conf"
     fi
 
-    # Backup SSL certificates
-    if [[ -d "/etc/letsencrypt/live/aim.silverday.de" ]]; then
-        tar -czf "${BACKUP_DIR}/config/ssl-certificates.tar.gz" \
-            -C "/etc/letsencrypt" live/aim.silverday.de/ archive/aim.silverday.de/ 2>/dev/null || true
-    fi
+    # Note: SSL certificates are managed by the hosting provider
+    # and don't need to be backed up in a shared hosting environment
 
     log "SUCCESS" "File backup completed"
 }
@@ -166,12 +163,11 @@ backup_logs() {
     log "INFO" "Starting log backup..."
 
     # Backup last 7 days of logs
-    find /var/log/aigov -name "*.log" -mtime -7 -type f | \
+    find "${PROJECT_ROOT}/storage/logs" -name "*.log" -mtime -7 -type f | \
         tar -czf "${BACKUP_DIR}/logs/recent-logs.tar.gz" -T - 2>/dev/null || true
 
-    # Backup nginx logs
-    find /var/log/nginx -name "*aim.silverday.de*" -mtime -7 -type f | \
-        tar -czf "${BACKUP_DIR}/logs/nginx-logs.tar.gz" -T - 2>/dev/null || true
+    # Note: Web server logs are managed by the hosting provider
+    # and are typically not accessible in shared hosting environments
 
     log "SUCCESS" "Log backup completed"
 }
@@ -270,8 +266,8 @@ send_notification() {
     # Example: send email, Slack notification, etc.
 
     # Write status to a file for monitoring systems
-    echo "${status}" > "/var/log/aigov/last_backup_status"
-    echo "$(date -Iseconds)" > "/var/log/aigov/last_backup_time"
+    echo "${status}" > "${PROJECT_ROOT}/storage/logs/last_backup_status"
+    echo "$(date -Iseconds)" > "${PROJECT_ROOT}/storage/logs/last_backup_time"
 }
 
 # Main backup function

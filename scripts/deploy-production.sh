@@ -9,8 +9,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 DEPLOY_USER="www-data"
 DEPLOY_GROUP="www-data"
-BACKUP_DIR="/var/backups/aigov"
-LOG_FILE="/var/log/aigov/deploy.log"
+BACKUP_DIR="${PROJECT_ROOT}/storage/backups"
+LOG_FILE="${PROJECT_ROOT}/storage/logs/deploy.log"
 
 # Colors for output
 RED='\033[0;31m'
@@ -45,82 +45,102 @@ error_handler() {
 
 trap 'error_handler ${LINENO}' ERR
 
-# Check if running as root or with sudo
+# Check if we can write to project directory
 check_permissions() {
-    if [[ $EUID -ne 0 ]]; then
-        log "ERROR" "This script must be run as root or with sudo"
+    if [[ ! -w "${PROJECT_ROOT}" ]]; then
+        log "ERROR" "Cannot write to project directory: ${PROJECT_ROOT}"
+        log "ERROR" "Please ensure you have write permissions to this directory"
         exit 1
     fi
+
+    log "INFO" "Running deployment in user mode (no system-wide changes)"
 }
 
-# Create necessary directories
+# Create necessary directories within project
 create_directories() {
-    log "INFO" "Creating necessary directories..."
+    log "INFO" "Creating necessary directories within project..."
 
-    mkdir -p /var/log/aigov
-    mkdir -p /var/app/storage/documents
-    mkdir -p /var/backups/aigov
-    mkdir -p /etc/aigov
+    mkdir -p "${PROJECT_ROOT}/storage/logs"
+    mkdir -p "${PROJECT_ROOT}/storage/documents"
+    mkdir -p "${PROJECT_ROOT}/storage/backups"
+    mkdir -p "${PROJECT_ROOT}/storage/cache"
+    mkdir -p "${PROJECT_ROOT}/config/production"
 
-    # Set proper ownership
-    chown -R ${DEPLOY_USER}:${DEPLOY_GROUP} /var/app/storage
-    chown -R ${DEPLOY_USER}:${DEPLOY_GROUP} /var/log/aigov
-
-    # Set proper permissions
-    chmod 750 /var/app/storage
-    chmod 750 /var/log/aigov
-    chmod 700 /var/backups/aigov
-
-    log "SUCCESS" "Directories created successfully"
-}
-
-# Install system dependencies
-install_system_dependencies() {
-    log "INFO" "Installing system dependencies..."
-
-    # Update package list
-    apt-get update -qq
-
-    # Install PHP 8.3 and required extensions
-    apt-get install -y \
-        php8.3-fpm \
-        php8.3-cli \
-        php8.3-mysql \
-        php8.3-xml \
-        php8.3-mbstring \
-        php8.3-curl \
-        php8.3-zip \
-        php8.3-intl \
-        php8.3-bcmath \
-        php8.3-gd \
-        php8.3-redis \
-        composer \
-        nginx \
-        mysql-server \
-        redis-server \
-        certbot \
-        python3-certbot-nginx \
-        logrotate \
-        fail2ban
-
-    # Install Node.js 20
-    if ! command -v node &> /dev/null || [[ $(node -v | cut -d'v' -f2 | cut -d'.' -f1) -lt 20 ]]; then
-        curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-        apt-get install -y nodejs
+    # Set proper ownership (if running as root, otherwise skip)
+    if [[ $EUID -eq 0 ]]; then
+        chown -R ${DEPLOY_USER}:${DEPLOY_GROUP} "${PROJECT_ROOT}/storage"
+        chmod 750 "${PROJECT_ROOT}/storage"
+        chmod 700 "${PROJECT_ROOT}/storage/backups"
+    else
+        chmod 750 "${PROJECT_ROOT}/storage"
+        chmod 700 "${PROJECT_ROOT}/storage/backups"
     fi
 
-    log "SUCCESS" "System dependencies installed"
+    log "SUCCESS" "Project directories created successfully"
 }
 
-# Configure PHP
-configure_php() {
-    log "INFO" "Configuring PHP for production..."
+# Check system dependencies (don't install)
+check_system_dependencies() {
+    log "INFO" "Checking system dependencies..."
 
-    # PHP-FPM configuration
-    cat > /etc/php/8.3/fpm/pool.d/aigov.conf <<EOF
+    local missing_deps=()
+
+    # Check PHP 8.3+
+    if ! command -v php &> /dev/null; then
+        missing_deps+=("php-cli")
+    else
+        local php_version=$(php -r "echo PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION;")
+        if [[ $(echo "$php_version >= 8.3" | bc -l) -eq 0 ]]; then
+            missing_deps+=("php-8.3+")
+        fi
+    fi
+
+    # Check Composer
+    if ! command -v composer &> /dev/null; then
+        missing_deps+=("composer")
+    fi
+
+    # Check Node.js 18+
+    if ! command -v node &> /dev/null; then
+        missing_deps+=("nodejs")
+    else
+        local node_version=$(node -v | cut -d'v' -f2 | cut -d'.' -f1)
+        if [[ $node_version -lt 18 ]]; then
+            missing_deps+=("nodejs-18+")
+        fi
+    fi
+
+    # Check required PHP extensions
+    local required_extensions=("pdo_mysql" "mbstring" "xml" "curl" "zip" "intl" "json")
+    for ext in "${required_extensions[@]}"; do
+        if ! php -m | grep -q "$ext"; then
+            missing_deps+=("php-$ext")
+        fi
+    done
+
+    if [[ ${#missing_deps[@]} -gt 0 ]]; then
+        log "ERROR" "Missing dependencies: ${missing_deps[*]}"
+        log "ERROR" "Please install the missing dependencies and run this script again"
+        log "INFO" "For Ubuntu/Debian:"
+        log "INFO" "  sudo apt install php8.3-cli php8.3-mysql php8.3-mbstring php8.3-xml php8.3-curl php8.3-zip php8.3-intl composer nodejs npm"
+        return 1
+    fi
+
+    log "SUCCESS" "All dependencies available"
+}
+
+# Generate PHP configuration template
+generate_php_config() {
+    log "INFO" "Generating PHP configuration template..."
+
+    # Create PHP-FPM pool configuration template
+    cat > "${PROJECT_ROOT}/config/php-fpm-pool.conf" <<EOF
+; PHP-FPM pool configuration for AI Governance Platform
+; Copy this to your PHP-FPM pool directory (e.g., /etc/php/8.3/fpm/pool.d/aigov.conf)
+
 [aigov]
-user = ${DEPLOY_USER}
-group = ${DEPLOY_GROUP}
+user = www-data
+group = www-data
 listen = /run/php/php8.3-fpm-aigov.sock
 listen.owner = www-data
 listen.group = www-data
@@ -133,11 +153,11 @@ pm.min_spare_servers = 5
 pm.max_spare_servers = 10
 pm.max_requests = 500
 
-; Security
+; Security settings
 php_admin_value[expose_php] = off
 php_admin_value[display_errors] = off
 php_admin_value[log_errors] = on
-php_admin_value[error_log] = /var/log/aigov/php-error.log
+php_admin_value[error_log] = ${PROJECT_ROOT}/storage/logs/php-error.log
 php_admin_value[memory_limit] = 256M
 php_admin_value[max_execution_time] = 60
 php_admin_value[upload_max_filesize] = 50M
@@ -151,22 +171,15 @@ php_admin_value[session.use_strict_mode] = 1
 php_admin_value[session.cookie_samesite] = "Strict"
 EOF
 
-    # Restart PHP-FPM
-    systemctl restart php8.3-fpm
-    systemctl enable php8.3-fpm
-
-    log "SUCCESS" "PHP configured"
+    log "SUCCESS" "PHP configuration template created at config/php-fpm-pool.conf"
 }
 
-# Configure Nginx
-configure_nginx() {
-    log "INFO" "Configuring Nginx..."
+# Generate Nginx configuration template
+generate_nginx_config() {
+    log "INFO" "Generating Nginx configuration template..."
 
-    # Remove default site
-    rm -f /etc/nginx/sites-enabled/default
-
-    # Create Nginx configuration
-    cat > /etc/nginx/sites-available/aigov <<EOF
+    # Create Nginx configuration template
+    cat > "${PROJECT_ROOT}/config/nginx-site.conf" <<EOF
 # Rate limiting zones
 limit_req_zone \$binary_remote_addr zone=api:10m rate=60r/m;
 limit_req_zone \$binary_remote_addr zone=auth:10m rate=10r/m;
@@ -275,36 +288,42 @@ server {
 }
 EOF
 
-    # Enable site
-    ln -sf /etc/nginx/sites-available/aigov /etc/nginx/sites-enabled/
-
-    # Test configuration
-    nginx -t
-
-    # Restart Nginx
-    systemctl restart nginx
-    systemctl enable nginx
-
-    log "SUCCESS" "Nginx configured"
+    log "SUCCESS" "Nginx configuration template created at config/nginx-site.conf"
+    log "INFO" "To enable this site, copy the config to your web server:"
+    log "INFO" "  sudo cp config/nginx-site.conf /etc/nginx/sites-available/aigov"
+    log "INFO" "  sudo ln -sf /etc/nginx/sites-available/aigov /etc/nginx/sites-enabled/"
+    log "INFO" "  sudo nginx -t && sudo systemctl reload nginx"
 }
 
-# Setup SSL certificate
-setup_ssl() {
-    log "INFO" "Setting up SSL certificate..."
+# Generate SSL setup instructions
+generate_ssl_instructions() {
+    log "INFO" "Generating SSL setup instructions..."
 
-    # Stop Nginx temporarily for certificate generation
-    systemctl stop nginx
+    cat > "${PROJECT_ROOT}/config/ssl-setup.md" <<EOF
+# SSL Certificate Setup for aim.silverday.de
 
-    # Generate certificate
-    certbot certonly --standalone -d aim.silverday.de --non-interactive --agree-tos --email klingner@silverday.de
+## Option 1: Let's Encrypt (if you have sudo access)
+\`\`\`bash
+sudo certbot --nginx -d aim.silverday.de
+\`\`\`
 
-    # Setup auto-renewal
-    systemctl enable certbot.timer
+## Option 2: Existing Certificate
+If you have an existing SSL certificate, update the nginx configuration:
+- Set ssl_certificate path to your certificate file
+- Set ssl_certificate_key path to your private key file
 
-    # Start Nginx again
-    systemctl start nginx
+## Option 3: Shared Hosting
+If your hosting provider manages SSL certificates, they should automatically
+work with the domain aim.silverday.de once the nginx configuration is applied.
 
-    log "SUCCESS" "SSL certificate configured"
+## Verify SSL
+After setup, verify SSL is working:
+\`\`\`bash
+curl -I https://aim.silverday.de/health
+\`\`\`
+EOF
+
+    log "SUCCESS" "SSL setup instructions created at config/ssl-setup.md"
 }
 
 # Install application dependencies
@@ -359,64 +378,100 @@ configure_environment() {
     log "SUCCESS" "Environment configured"
 }
 
-# Setup database
-setup_database() {
-    log "INFO" "Setting up production database..."
+# Setup application database
+setup_application() {
+    log "INFO" "Setting up application..."
 
-    # Create database and user
-    mysql -e "CREATE DATABASE IF NOT EXISTS aigov_production CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
-    mysql -e "CREATE USER IF NOT EXISTS 'aigov_user'@'localhost' IDENTIFIED BY 'TEMP_PASSWORD';"
-    mysql -e "GRANT ALL PRIVILEGES ON aigov_production.* TO 'aigov_user'@'localhost';"
-    mysql -e "FLUSH PRIVILEGES;"
+    # Generate database setup instructions
+    cat > "${PROJECT_ROOT}/config/database-setup.sql" <<EOF
+-- Database setup for AI Governance Platform
+-- Run these commands in your MySQL/MariaDB console
 
-    log "WARN" "Please update the database password in .env and MySQL: ALTER USER 'aigov_user'@'localhost' IDENTIFIED BY 'your_secure_password';"
+CREATE DATABASE IF NOT EXISTS aigov_production CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER IF NOT EXISTS 'aigov_user'@'localhost' IDENTIFIED BY 'YOUR_SECURE_PASSWORD_HERE';
+GRANT ALL PRIVILEGES ON aigov_production.* TO 'aigov_user'@'localhost';
+FLUSH PRIVILEGES;
+EOF
 
-    # Run migrations
-    cd "${PROJECT_ROOT}"
-    php scripts/migrate.php
-    php scripts/seed.php
+    log "INFO" "Database setup SQL created at config/database-setup.sql"
 
-    log "SUCCESS" "Database setup completed"
+    # Run migrations if database is configured
+    if [[ -f "${PROJECT_ROOT}/.env" ]]; then
+        source "${PROJECT_ROOT}/.env"
+        if [[ -n "${DB_DATABASE:-}" ]]; then
+            log "INFO" "Running database migrations..."
+            cd "${PROJECT_ROOT}"
+
+            if php scripts/migrate.php; then
+                log "SUCCESS" "Database migrations completed"
+
+                if php scripts/seed.php; then
+                    log "SUCCESS" "Database seeding completed"
+                else
+                    log "WARN" "Database seeding failed - check database connection"
+                fi
+            else
+                log "WARN" "Database migrations failed - check database connection and configuration"
+            fi
+        else
+            log "WARN" "Database not configured in .env file"
+        fi
+    fi
+
+    log "SUCCESS" "Application setup completed"
 }
 
-# Setup monitoring and logging
+# Setup monitoring within project
 setup_monitoring() {
-    log "INFO" "Setting up monitoring and logging..."
+    log "INFO" "Setting up monitoring within project..."
 
-    # Logrotate configuration
-    cat > /etc/logrotate.d/aigov <<EOF
-/var/log/aigov/*.log {
+    # Create logrotate configuration template
+    cat > "${PROJECT_ROOT}/config/logrotate.conf" <<EOF
+# Logrotate configuration for AI Governance Platform
+# Copy this to /etc/logrotate.d/aigov (requires sudo access)
+
+${PROJECT_ROOT}/storage/logs/*.log {
     daily
     missingok
     rotate 30
     compress
     delaycompress
     notifempty
-    create 644 ${DEPLOY_USER} ${DEPLOY_GROUP}
-    postrotate
-        systemctl reload php8.3-fpm
-    endscript
+    create 644 www-data www-data
 }
 EOF
 
-    # Create systemd service for monitoring
-    cat > /etc/systemd/system/aigov-monitor.service <<EOF
-[Unit]
-Description=AI Governance Platform Monitoring
-After=network.target
+    # Create cron job template for monitoring
+    cat > "${PROJECT_ROOT}/config/crontab.txt" <<EOF
+# Crontab entries for AI Governance Platform
+# Add these to your crontab with: crontab -e
 
-[Service]
-Type=simple
-ExecStart=/usr/bin/php ${PROJECT_ROOT}/scripts/monitor.php
-Restart=always
-User=${DEPLOY_USER}
-Group=${DEPLOY_GROUP}
+# Run monitoring check every 5 minutes
+*/5 * * * * cd ${PROJECT_ROOT} && php scripts/monitor.php >> storage/logs/monitor.log 2>&1
 
-[Install]
-WantedBy=multi-user.target
+# Run daily backup at 2 AM
+0 2 * * * cd ${PROJECT_ROOT} && ./scripts/backup.sh >> storage/logs/backup.log 2>&1
+
+# Clean up old log files weekly
+0 1 * * 0 find ${PROJECT_ROOT}/storage/logs -name "*.log" -mtime +30 -delete
 EOF
 
-    log "SUCCESS" "Monitoring and logging configured"
+    # Create simple monitoring runner
+    cat > "${PROJECT_ROOT}/scripts/start-monitoring.sh" <<EOF
+#!/bin/bash
+# Simple monitoring runner (alternative to systemd service)
+cd "${PROJECT_ROOT}"
+while true; do
+    php scripts/monitor.php
+    sleep 300  # Run every 5 minutes
+done
+EOF
+
+    chmod +x "${PROJECT_ROOT}/scripts/start-monitoring.sh"
+
+    log "SUCCESS" "Monitoring templates created"
+    log "INFO" "To enable monitoring, add the cron jobs from config/crontab.txt to your crontab"
+    log "INFO" "Or run scripts/start-monitoring.sh in the background"
 }
 
 # Main deployment function
@@ -441,32 +496,30 @@ main() {
         log "INFO" "Creating backup..."
         backup_timestamp=$(date +%Y%m%d_%H%M%S)
         mkdir -p "${BACKUP_DIR}/${backup_timestamp}"
-        cp -r "${PROJECT_ROOT}" "${BACKUP_DIR}/${backup_timestamp}/"
-        mysqldump --defaults-extra-file=/etc/mysql/debian.cnf aigov_production > "${BACKUP_DIR}/${backup_timestamp}/database.sql" 2>/dev/null || true
+        cp -r "${PROJECT_ROOT}" "${BACKUP_DIR}/${backup_timestamp}/" 2>/dev/null || true
     fi
 
     create_directories
-    install_system_dependencies
-    configure_php
-    configure_nginx
-    setup_ssl
+    check_system_dependencies
+    generate_php_config
+    generate_nginx_config
+    generate_ssl_instructions
     install_app_dependencies
     configure_environment
-    setup_database
+    setup_application
     setup_monitoring
 
-    # Final security hardening
-    ufw --force enable
-    ufw allow 22
-    ufw allow 80
-    ufw allow 443
-
-    log "SUCCESS" "Production deployment completed successfully!"
+    log "SUCCESS" "Application deployment completed successfully!"
     log "INFO" "Next steps:"
-    log "INFO" "1. Update database password in .env and MySQL"
-    log "INFO" "2. Configure email settings in .env"
-    log "INFO" "3. Test the application at https://aim.silverday.de"
-    log "INFO" "4. Monitor logs in /var/log/aigov/"
+    log "INFO" "1. Set up your database using config/database-setup.sql"
+    log "INFO" "2. Copy config/nginx-site.conf to your web server configuration"
+    log "INFO" "3. Copy config/php-fpm-pool.conf to your PHP-FPM configuration"
+    log "INFO" "4. Update database password and other settings in .env"
+    log "INFO" "5. Configure email settings in .env"
+    log "INFO" "6. Set up SSL certificate (see config/ssl-setup.md)"
+    log "INFO" "7. Add cron jobs from config/crontab.txt for monitoring and backups"
+    log "INFO" "8. Test the application at https://aim.silverday.de"
+    log "INFO" "9. Monitor logs in storage/logs/"
 }
 
 # Run main function

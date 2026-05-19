@@ -46,9 +46,19 @@ final class MonitorController
             $health['database'] = 'error';
         }
 
-        $statusCode = $health['status'] === 'ok' ? 200 : 503;
-
-        return Response::success($health, [], $statusCode);
+        // Return appropriate status code
+        if ($health['status'] === 'ok') {
+            return Response::success($health);
+        } else {
+            // Create degraded response with 503 status
+            $envelope = [
+                'success' => true,
+                'data' => $health,
+                'errors' => [],
+                'meta' => []
+            ];
+            return new Response($envelope, 503);
+        }
     }
 
     /**
@@ -58,9 +68,9 @@ final class MonitorController
     public function status(Request $request): Response
     {
         // Only allow in development or with special header
+        $monitorKey = $request->getHeader('X-Monitor-Key');
         if ($this->config->get('app.env') === 'production' &&
-            !$request->hasHeader('X-Monitor-Key') ||
-            $request->getHeader('X-Monitor-Key') !== $this->config->get('monitoring.secret_key')) {
+            (empty($monitorKey) || $monitorKey !== $this->config->get('monitoring.secret_key'))) {
             return Response::error(['message' => 'Access denied'], 403);
         }
 
@@ -74,7 +84,7 @@ final class MonitorController
 
         // Determine overall status
         $overallStatus = 'ok';
-        foreach ($status as $component => $details) {
+        foreach ($status as $details) {
             if ($details['status'] === 'critical') {
                 $overallStatus = 'critical';
                 break;
@@ -90,13 +100,18 @@ final class MonitorController
             'checks' => $status
         ];
 
-        $statusCode = match($overallStatus) {
-            'critical' => 503,
-            'warning' => 200,
-            default => 200
-        };
+        // Return appropriate response
+        if ($overallStatus === 'critical') {
+            $envelope = [
+                'success' => true,
+                'data' => $response,
+                'errors' => [],
+                'meta' => []
+            ];
+            return new Response($envelope, 503);
+        }
 
-        return Response::success($response, [], $statusCode);
+        return Response::success($response);
     }
 
     /**
@@ -105,8 +120,8 @@ final class MonitorController
      */
     public function metrics(Request $request): Response
     {
-        if ($this->config->get('app.env') === 'production' &&
-            !$request->hasHeader('X-Monitor-Key')) {
+        $monitorKey = $request->getHeader('X-Monitor-Key');
+        if ($this->config->get('app.env') === 'production' && empty($monitorKey)) {
             return Response::error(['message' => 'Access denied'], 403);
         }
 
@@ -203,9 +218,10 @@ final class MonitorController
             'post_max_size' => ini_get('post_max_size')
         ];
 
-        // Check disk space
-        $freeBytes = disk_free_bytes('/');
-        $totalBytes = disk_total_space('/');
+        // Check disk space for project directory
+        $projectRoot = dirname(dirname(dirname(__DIR__)));
+        $freeBytes = disk_free_space($projectRoot);
+        $totalBytes = disk_total_space($projectRoot);
         $usedPercent = (($totalBytes - $freeBytes) / $totalBytes) * 100;
 
         $status['disk_free_gb'] = round($freeBytes / 1024 / 1024 / 1024, 2);
@@ -305,7 +321,7 @@ final class MonitorController
                 'table_count' => $stats['table_count'] ?? 0
             ];
 
-        } catch (Exception $e) {
+        } catch (Exception $_) {
             return [
                 'status' => 'error',
                 'error' => 'Unable to fetch database metrics'
@@ -334,7 +350,8 @@ final class MonitorController
     private function getApplicationUptime(): int
     {
         // Simple uptime calculation based on log file
-        $logFile = '/var/log/aigov/app.log';
+        $projectRoot = dirname(dirname(dirname(__DIR__)));
+        $logFile = $projectRoot . '/storage/logs/app.log';
         if (file_exists($logFile)) {
             return time() - filemtime($logFile);
         }
@@ -371,7 +388,7 @@ final class MonitorController
                 'days_until_expiry' => round($daysUntilExpiry, 1)
             ];
 
-        } catch (Exception $e) {
+        } catch (Exception $_) {
             return [
                 'status' => 'error',
                 'message' => 'Unable to read SSL certificate'
@@ -394,7 +411,7 @@ final class MonitorController
         $missing = [];
 
         foreach ($expectedHeaders as $header) {
-            if (!$request->hasHeader($header)) {
+            if (empty($request->getHeader($header))) {
                 $missing[] = $header;
             }
         }

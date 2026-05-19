@@ -110,17 +110,18 @@ class ProductionMonitor
             'details' => []
         ];
 
+        $projectRoot = dirname(__DIR__);
         $paths = [
-            'root' => '/',
-            'storage' => '/var/app/storage',
-            'logs' => '/var/log/aigov',
-            'backups' => '/var/backups/aigov'
+            'project' => $projectRoot,
+            'storage' => $projectRoot . '/storage',
+            'logs' => $projectRoot . '/storage/logs',
+            'backups' => $projectRoot . '/storage/backups'
         ];
 
         foreach ($paths as $name => $path) {
             if (!file_exists($path)) continue;
 
-            $bytes = disk_free_bytes($path);
+            $bytes = disk_free_space($path);
             $total = disk_total_space($path);
             $used_percent = (($total - $bytes) / $total) * 100;
 
@@ -150,10 +151,11 @@ class ProductionMonitor
             'details' => []
         ];
 
+        $projectRoot = dirname(__DIR__);
         $criticalPaths = [
-            '/srv/vhosts/aim.silverday.de/.env' => '600',
-            '/var/app/storage' => '750',
-            '/var/log/aigov' => '750'
+            $projectRoot . '/.env' => '600',
+            $projectRoot . '/storage' => '750',
+            $projectRoot . '/storage/logs' => '750'
         ];
 
         foreach ($criticalPaths as $path => $expectedPerms) {
@@ -244,7 +246,8 @@ class ProductionMonitor
             'details' => []
         ];
 
-        $logPath = '/var/log/aigov';
+        $projectRoot = dirname(__DIR__);
+        $logPath = $projectRoot . '/storage/logs';
         if (!is_dir($logPath)) {
             $result['status'] = 'warning';
             $result['message'] = 'Log directory missing';
@@ -288,7 +291,8 @@ class ProductionMonitor
             'details' => []
         ];
 
-        $backupPath = '/var/backups/aigov';
+        $projectRoot = dirname(__DIR__);
+        $backupPath = $projectRoot . '/storage/backups';
         if (!is_dir($backupPath)) {
             $result['status'] = 'warning';
             $result['message'] = 'Backup directory missing';
@@ -360,8 +364,17 @@ class ProductionMonitor
             'checks' => $this->checks
         ];
 
+        $projectRoot = dirname(__DIR__);
+        $logFile = $projectRoot . '/storage/logs/monitor.log';
+
+        // Ensure log directory exists
+        $logDir = dirname($logFile);
+        if (!is_dir($logDir)) {
+            mkdir($logDir, 0750, true);
+        }
+
         file_put_contents(
-            '/var/log/aigov/monitor.log',
+            $logFile,
             json_encode($logEntry) . "\n",
             FILE_APPEND | LOCK_EX
         );
@@ -376,6 +389,11 @@ class ProductionMonitor
     {
         // This would integrate with your alerting system (email, Slack, etc.)
         $this->log("🚨 ALERT: {$critical} critical issues detected!");
+
+        // Write alert status files
+        $projectRoot = dirname(__DIR__);
+        file_put_contents($projectRoot . '/storage/logs/last_backup_status', 'ALERT');
+        file_put_contents($projectRoot . '/storage/logs/last_backup_time', date('c'));
 
         // Example: Send email alert
         // $this->sendEmailAlert($critical, $warnings);
@@ -396,7 +414,7 @@ if (basename(__FILE__) === basename($_SERVER['SCRIPT_NAME'] ?? '')) {
     $results = $monitor->runAllChecks();
 
     // Exit with appropriate code
-    $hascritical = false;
+    $hasCritical = false;
     foreach ($results as $result) {
         if ($result['status'] === 'critical') {
             $hasCritical = true;
