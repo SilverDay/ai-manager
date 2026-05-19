@@ -108,6 +108,11 @@ jobs:
             sed -i 's/DB_USERNAME=.*/DB_USERNAME=test_user/' .env
             sed -i 's/DB_PASSWORD=.*/DB_PASSWORD=test_password/' .env
             sed -i 's/DB_HOST=.*/DB_HOST=127.0.0.1/' .env
+            # Set a test JWT secret (32+ characters required)
+            sed -i 's/JWT_SECRET=.*/JWT_SECRET=test_jwt_secret_for_ci_32_chars_min/' .env
+            # Set test environment variables
+            sed -i 's/APP_ENV=.*/APP_ENV=testing/' .env
+            sed -i 's/APP_DEBUG=.*/APP_DEBUG=true/' .env
           fi
 
       - name: Wait for MariaDB
