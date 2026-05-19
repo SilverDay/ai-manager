@@ -77,6 +77,8 @@ jobs:
           sed -i 's/DB_USERNAME=.*/DB_USERNAME=test_user/' .env
           sed -i 's/DB_PASSWORD=.*/DB_PASSWORD=test_password/' .env
           sed -i 's/DB_HOST=.*/DB_HOST=127.0.0.1/' .env
+          # Set test JWT secret (32+ characters required)
+          sed -i 's/JWT_SECRET=.*/JWT_SECRET=test_jwt_secret_for_ci_32_chars_min/' .env
           cd .. && php scripts/migrate.php
           cd backend && vendor/bin/phpunit --configuration phpunit.xml || echo "Tests not configured yet"
 
@@ -223,8 +225,8 @@ jobs:
             # Clear any caches
             sudo -u www-data find . -name '*.cache' -delete 2>/dev/null || true
 
-            # Restart services
-            sudo systemctl reload php8.3-fpm nginx
+            # Restart services (Apache setup)
+            sudo systemctl reload apache2
 
             # Remove old release (keep last 5)
             sudo find /srv/releases -maxdepth 1 -type d -name '20*' | sort -r | tail -n +6 | xargs sudo rm -rf
@@ -246,7 +248,7 @@ jobs:
           attempt=1
 
           while [ \$attempt -le \$max_attempts ]; do
-            if curl -f -s https://${{ env.DEPLOY_HOST }}/health; then
+            if curl -f -s https://${{ env.DEPLOY_HOST }}/api/v1/health; then
               echo \"Health check passed on attempt \$attempt\"
               break
             fi
@@ -276,7 +278,7 @@ jobs:
               if [ -L '${{ env.DEPLOY_PATH }}.old' ] || [ -d '${{ env.DEPLOY_PATH }}.old' ]; then
                 sudo mv '${{ env.DEPLOY_PATH }}' '${{ env.DEPLOY_PATH }}.failed'
                 sudo mv '${{ env.DEPLOY_PATH }}.old' '${{ env.DEPLOY_PATH }}'
-                sudo systemctl reload php8.3-fpm nginx
+                sudo systemctl reload apache2
                 echo 'Rollback completed'
               fi
             " || true
