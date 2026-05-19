@@ -501,25 +501,16 @@ main() {
 
     create_directories
     check_system_dependencies
-    generate_php_config
-    generate_nginx_config
-    generate_ssl_instructions
     install_app_dependencies
     configure_environment
     setup_application
-    setup_monitoring
 
     log "SUCCESS" "Application deployment completed successfully!"
     log "INFO" "Next steps:"
     log "INFO" "1. Set up your database using config/database-setup.sql"
-    log "INFO" "2. Copy config/nginx-site.conf to your web server configuration"
-    log "INFO" "3. Copy config/php-fpm-pool.conf to your PHP-FPM configuration"
-    log "INFO" "4. Update database password and other settings in .env"
-    log "INFO" "5. Configure email settings in .env"
-    log "INFO" "6. Set up SSL certificate (see config/ssl-setup.md)"
-    log "INFO" "7. Add cron jobs from config/crontab.txt for monitoring and backups"
-    log "INFO" "8. Test the application at https://aim.silverday.de"
-    log "INFO" "9. Monitor logs in storage/logs/"
+    log "INFO" "2. Update database password and other settings in .env"
+    log "INFO" "3. Test the application at https://aim.silverday.de"
+    log "INFO" "4. Monitor logs in storage/logs/"
 }
 
 # Run main function
