@@ -103,7 +103,8 @@ jobs:
           if [ -f .env.testing ]; then
             cp .env.testing .env
           else
-            cp .env.example .env
+            # Copy from project root (backend/.env.example doesn't have full config)
+            cp ../.env.example .env
             # Update test database settings
             sed -i 's/^DB_DATABASE=.*/DB_DATABASE=aigov_test/' .env
             sed -i 's/^DB_USERNAME=.*/DB_USERNAME=test_user/' .env
