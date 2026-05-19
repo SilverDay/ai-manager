@@ -1,4 +1,4 @@
-name: Deploy to Production
+name: Build and Test
 
 on:
   push:
@@ -11,10 +11,8 @@ on:
         type: boolean
         default: false
 
-env:
-  DEPLOY_HOST: aim.silverday.de
-  DEPLOY_USER: deploy
-  DEPLOY_PATH: /srv/vhosts/aim.silverday.de
+# Simplified workflow - just runs tests and builds
+# For actual deployment, use manual process
 
 jobs:
   tests:
@@ -147,163 +145,23 @@ jobs:
           path: deployment.tar.gz
           retention-days: 30
 
-  deploy:
-    name: Deploy to Production
+  summary:
+    name: Build Summary
     runs-on: ubuntu-latest
     needs: [tests, build]
-    if: always() && needs.build.result == 'success'
+    if: always()
 
     steps:
-      - name: Download deployment artifact
-        uses: actions/download-artifact@v3
-        with:
-          name: deployment-package
-
-      - name: Setup SSH key
-        if: secrets.DEPLOY_SSH_KEY
+      - name: Build and Test Summary
         run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -H ${{ env.DEPLOY_HOST }} >> ~/.ssh/known_hosts
-
-      - name: Skip deployment (no SSH key)
-        if: '!secrets.DEPLOY_SSH_KEY'
-        run: |
-          echo "⚠️ DEPLOY_SSH_KEY secret not configured - skipping deployment"
-          echo "To enable deployment, add DEPLOY_SSH_KEY to repository secrets"
-          echo "This workflow will run tests and build but skip actual deployment"
-
-      - name: Create backup on server
-        if: secrets.DEPLOY_SSH_KEY
-        run: |
-          ssh ${{ env.DEPLOY_USER }}@${{ env.DEPLOY_HOST }} "
-            if [ -d '${{ env.DEPLOY_PATH }}' ]; then
-              backup_dir='/var/backups/aigov/pre-deploy-$(date +%Y%m%d_%H%M%S)'
-              sudo mkdir -p \"\$backup_dir\"
-              sudo cp -r '${{ env.DEPLOY_PATH }}' \"\$backup_dir/\"
-              echo \"Backup created at \$backup_dir\"
-            fi
-          "
-
-      - name: Deploy application
-        if: secrets.DEPLOY_SSH_KEY
-        run: |
-          # Copy deployment package to server
-          scp deployment.tar.gz ${{ env.DEPLOY_USER }}@${{ env.DEPLOY_HOST }}:/tmp/
-
-          # Extract and deploy on server
-          ssh ${{ env.DEPLOY_USER }}@${{ env.DEPLOY_HOST }} "
-            set -e
-
-            # Create temporary extraction directory
-            temp_dir='/tmp/deployment-$(date +%s)'
-            mkdir -p \"\$temp_dir\"
-
-            # Extract deployment package
-            cd \"\$temp_dir\"
-            tar -xzf /tmp/deployment.tar.gz
-
-            # Preserve current .env file
-            if [ -f '${{ env.DEPLOY_PATH }}/.env' ]; then
-              cp '${{ env.DEPLOY_PATH }}/.env' \"\$temp_dir/.env\"
-            fi
-
-            # Atomic deployment using symlink swap
-            current_link='${{ env.DEPLOY_PATH }}'
-            new_release_dir='/srv/releases/$(date +%Y%m%d_%H%M%S)'
-
-            # Create releases directory
-            sudo mkdir -p /srv/releases
-
-            # Move extracted files to new release directory
-            sudo mv \"\$temp_dir\" \"\$new_release_dir\"
-
-            # Set proper ownership
-            sudo chown -R www-data:www-data \"\$new_release_dir\"
-
-            # Atomic symlink swap
-            if [ -L \"\$current_link\" ] || [ -d \"\$current_link\" ]; then
-              sudo mv \"\$current_link\" \"\$current_link.old\"
-            fi
-            sudo ln -sf \"\$new_release_dir\" \"\$current_link\"
-
-            # Run post-deployment tasks
-            cd \"\$current_link\"
-
-            # Run database migrations
-            sudo -u www-data php scripts/migrate.php
-
-            # Clear any caches
-            sudo -u www-data find . -name '*.cache' -delete 2>/dev/null || true
-
-            # Restart services (Apache setup)
-            sudo systemctl reload apache2
-
-            # Remove old release (keep last 5)
-            sudo find /srv/releases -maxdepth 1 -type d -name '20*' | sort -r | tail -n +6 | xargs sudo rm -rf
-
-            # Clean up
-            rm -f /tmp/deployment.tar.gz
-            sudo rm -rf \"\$current_link.old\" 2>/dev/null || true
-
-            echo 'Deployment completed successfully'
-          "
-
-      - name: Health check
-        if: secrets.DEPLOY_SSH_KEY
-        run: |
-          # Wait for application to start
-          sleep 10
-
-          # Check health endpoint
-          max_attempts=30
-          attempt=1
-
-          while [ \$attempt -le \$max_attempts ]; do
-            if curl -f -s https://${{ env.DEPLOY_HOST }}/api/v1/health; then
-              echo \"Health check passed on attempt \$attempt\"
-              break
-            fi
-
-            if [ \$attempt -eq \$max_attempts ]; then
-              echo \"Health check failed after \$max_attempts attempts\"
-              exit 1
-            fi
-
-            echo \"Health check attempt \$attempt failed, retrying in 10 seconds...\"
-            sleep 10
-            ((attempt++))
-          done
-
-      - name: Notify deployment status (with SSH)
-        if: always() && secrets.DEPLOY_SSH_KEY
-        run: |
-          if [ "${{ job.status }}" = "success" ]; then
-            echo "✅ Deployment to production successful"
-            echo "🚀 Application is live at https://${{ env.DEPLOY_HOST }}"
+          echo "🎯 Build and Test Results"
+          echo "========================"
+          echo "Tests: ${{ needs.tests.result }}"
+          echo "Build: ${{ needs.build.result }}"
+          echo ""
+          if [ "${{ needs.tests.result }}" = "success" ] && [ "${{ needs.build.result }}" = "success" ]; then
+            echo "✅ All checks passed! Ready for deployment."
+            echo "📦 Deployment artifact is available for download."
           else
-            echo "❌ Deployment to production failed"
-            echo "🔄 Rolling back deployment..."
-
-            # Attempt rollback
-            ssh ${{ env.DEPLOY_USER }}@${{ env.DEPLOY_HOST }} "
-              if [ -L '${{ env.DEPLOY_PATH }}.old' ] || [ -d '${{ env.DEPLOY_PATH }}.old' ]; then
-                sudo mv '${{ env.DEPLOY_PATH }}' '${{ env.DEPLOY_PATH }}.failed'
-                sudo mv '${{ env.DEPLOY_PATH }}.old' '${{ env.DEPLOY_PATH }}'
-                sudo systemctl reload apache2
-                echo 'Rollback completed'
-              fi
-            " || true
+            echo "❌ Some checks failed. Please review the logs above."
           fi
-
-      - name: Notify deployment status (no SSH)
-        if: always() && '!secrets.DEPLOY_SSH_KEY'
-        run: |
-          echo "ℹ️ Deployment skipped - DEPLOY_SSH_KEY secret not configured"
-          echo "✅ Build and tests completed successfully"
-          echo "📦 Deployment artifact available for manual deployment"
-
-      - name: Cleanup SSH key
-        if: always()
-        run: rm -f ~/.ssh/id_rsa
