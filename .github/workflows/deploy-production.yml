@@ -160,7 +160,7 @@ jobs:
           name: deployment-package
 
       - name: Setup SSH key
-        if: secrets.DEPLOY_SSH_KEY != ''
+        if: secrets.DEPLOY_SSH_KEY
         run: |
           mkdir -p ~/.ssh
           echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_rsa
@@ -168,14 +168,14 @@ jobs:
           ssh-keyscan -H ${{ env.DEPLOY_HOST }} >> ~/.ssh/known_hosts
 
       - name: Skip deployment (no SSH key)
-        if: secrets.DEPLOY_SSH_KEY == ''
+        if: '!secrets.DEPLOY_SSH_KEY'
         run: |
           echo "⚠️ DEPLOY_SSH_KEY secret not configured - skipping deployment"
           echo "To enable deployment, add DEPLOY_SSH_KEY to repository secrets"
           echo "This workflow will run tests and build but skip actual deployment"
 
       - name: Create backup on server
-        if: secrets.DEPLOY_SSH_KEY != ''
+        if: secrets.DEPLOY_SSH_KEY
         run: |
           ssh ${{ env.DEPLOY_USER }}@${{ env.DEPLOY_HOST }} "
             if [ -d '${{ env.DEPLOY_PATH }}' ]; then
@@ -187,7 +187,7 @@ jobs:
           "
 
       - name: Deploy application
-        if: secrets.DEPLOY_SSH_KEY != ''
+        if: secrets.DEPLOY_SSH_KEY
         run: |
           # Copy deployment package to server
           scp deployment.tar.gz ${{ env.DEPLOY_USER }}@${{ env.DEPLOY_HOST }}:/tmp/
@@ -251,7 +251,7 @@ jobs:
           "
 
       - name: Health check
-        if: secrets.DEPLOY_SSH_KEY != ''
+        if: secrets.DEPLOY_SSH_KEY
         run: |
           # Wait for application to start
           sleep 10
@@ -276,14 +276,10 @@ jobs:
             ((attempt++))
           done
 
-      - name: Notify deployment status
-        if: always()
+      - name: Notify deployment status (with SSH)
+        if: always() && secrets.DEPLOY_SSH_KEY
         run: |
-          if [ "${{ secrets.DEPLOY_SSH_KEY }}" = "" ]; then
-            echo "ℹ️ Deployment skipped - DEPLOY_SSH_KEY secret not configured"
-            echo "✅ Build and tests completed successfully"
-            echo "📦 Deployment artifact available for manual deployment"
-          elif [ "${{ job.status }}" = "success" ]; then
+          if [ "${{ job.status }}" = "success" ]; then
             echo "✅ Deployment to production successful"
             echo "🚀 Application is live at https://${{ env.DEPLOY_HOST }}"
           else
@@ -291,17 +287,22 @@ jobs:
             echo "🔄 Rolling back deployment..."
 
             # Attempt rollback
-            if [ "${{ secrets.DEPLOY_SSH_KEY }}" != "" ]; then
-              ssh ${{ env.DEPLOY_USER }}@${{ env.DEPLOY_HOST }} "
-                if [ -L '${{ env.DEPLOY_PATH }}.old' ] || [ -d '${{ env.DEPLOY_PATH }}.old' ]; then
-                  sudo mv '${{ env.DEPLOY_PATH }}' '${{ env.DEPLOY_PATH }}.failed'
-                  sudo mv '${{ env.DEPLOY_PATH }}.old' '${{ env.DEPLOY_PATH }}'
-                  sudo systemctl reload apache2
-                  echo 'Rollback completed'
-                fi
-              " || true
-            fi
+            ssh ${{ env.DEPLOY_USER }}@${{ env.DEPLOY_HOST }} "
+              if [ -L '${{ env.DEPLOY_PATH }}.old' ] || [ -d '${{ env.DEPLOY_PATH }}.old' ]; then
+                sudo mv '${{ env.DEPLOY_PATH }}' '${{ env.DEPLOY_PATH }}.failed'
+                sudo mv '${{ env.DEPLOY_PATH }}.old' '${{ env.DEPLOY_PATH }}'
+                sudo systemctl reload apache2
+                echo 'Rollback completed'
+              fi
+            " || true
           fi
+
+      - name: Notify deployment status (no SSH)
+        if: always() && '!secrets.DEPLOY_SSH_KEY'
+        run: |
+          echo "ℹ️ Deployment skipped - DEPLOY_SSH_KEY secret not configured"
+          echo "✅ Build and tests completed successfully"
+          echo "📦 Deployment artifact available for manual deployment"
 
       - name: Cleanup SSH key
         if: always()
