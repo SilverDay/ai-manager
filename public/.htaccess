@@ -1,5 +1,8 @@
 RewriteEngine On
 
+# Serve index.html for root path
+RewriteRule ^$ index.html [L]
+
 # Handle API routes and backend requests
 RewriteCond %{REQUEST_URI} ^/(api|health|status|metrics)
 RewriteCond %{REQUEST_FILENAME} !-f

@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 // Bootstrap the application
-require_once __DIR__ . '/../vendor/autoload.php';
+require_once __DIR__ . '/../backend/vendor/autoload.php';
 
 use App\Core\Application;
 use App\Core\ErrorHandler;
