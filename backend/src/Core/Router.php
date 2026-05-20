@@ -92,6 +92,23 @@ final class Router
         $method = $request->getMethod();
         $path = $request->getPath();
 
+        // Handle OPTIONS requests for CORS preflight
+        if ($method === 'OPTIONS') {
+            $corsRoute = $this->findCorsRouteForPath($path);
+            if ($corsRoute) {
+                // Create synthetic route with just CORS middleware
+                $syntheticRoute = new RouteDefinition(
+                    $path,
+                    $corsRoute->getPattern(),
+                    'CorsController', // Dummy controller
+                    'preflight',      // Dummy method
+                    ['cors']          // Only CORS middleware
+                );
+                $middlewareChain = $this->buildMiddlewareChain($syntheticRoute);
+                return $this->executeMiddlewareChain($middlewareChain, $request, $syntheticRoute);
+            }
+        }
+
         // Find matching route
         $matchedRoute = $this->findMatchingRoute($method, $path);
 
@@ -147,6 +164,22 @@ final class Router
             }
         }
 
+        return null;
+    }
+
+    /**
+     * Find a route with CORS middleware for the given path (for OPTIONS handling)
+     */
+    private function findCorsRouteForPath(string $path): ?RouteDefinition
+    {
+        // Check all methods for this path
+        foreach ($this->routes as $method => $routes) {
+            foreach ($routes as $route) {
+                if (preg_match($route->getPattern(), $path) && in_array('cors', $route->getMiddleware(), true)) {
+                    return $route;
+                }
+            }
+        }
         return null;
     }
 
@@ -220,8 +253,8 @@ final class Router
     private function instantiateController(string $controllerClass): object
     {
         // Simple dependency injection for core services
-        $config = Config::getInstance();
-        $database = new Database($config);
+        $config = $this->config ?? Config::getInstance();
+        $database = $this->database ?? new Database($config);
 
         try {
             $reflector = new \ReflectionClass($controllerClass);
@@ -264,10 +297,12 @@ final class Router
                         case RegistrationService::class:
                         case 'App\Services\RegistrationService':
                             $dependencies[] = new \App\Services\RegistrationService(
+                                $config,
                                 $database,
                                 new \App\Models\User($database),
                                 new \App\Models\TenantDomain($database),
-                                new \App\Models\UserInvitation($database)
+                                new \App\Models\UserInvitation($database),
+                                new \App\Services\JwtService($config)
                             );
                             break;
                         case TenantDomain::class:
@@ -290,6 +325,10 @@ final class Router
             return $reflector->newInstanceArgs($dependencies);
 
         } catch (\ReflectionException $e) {
+            error_log("Controller instantiation failed: {$controllerClass} - " . $e->getMessage());
+            throw new \RuntimeException("Cannot instantiate controller: {$controllerClass}", 0, $e);
+        } catch (\Throwable $e) {
+            error_log("Controller dependency injection failed: {$controllerClass} - " . $e->getMessage());
             throw new \RuntimeException("Cannot instantiate controller: {$controllerClass}", 0, $e);
         }
     }
@@ -337,9 +376,9 @@ final class Router
                 return $middleware->handle($request, $next);
             },
 
-            default => function (Request $request, callable $next) {
+            default => function (Request $request, callable $next) use ($name) {
                 // Log unknown middleware for debugging
-                error_log("Unknown middleware: {$middlewareName}");
+                error_log("Unknown middleware: {$name}");
                 return $next($request);
             }
         };

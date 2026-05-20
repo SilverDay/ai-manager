@@ -20,7 +20,14 @@ final class CorsMiddleware implements MiddlewareInterface
     public function handle(Request $request, callable $next): Response
     {
         $origin = $request->getHeader('Origin');
-        $allowedOrigins = $this->config->get('cors.allowed_origins', ['*']);
+        $allowedOriginsConfig = $this->config->get('cors.allowed_origins');
+
+        // Parse allowed origins from config (comma-separated string or array)
+        if (is_string($allowedOriginsConfig)) {
+            $allowedOrigins = array_map('trim', explode(',', $allowedOriginsConfig));
+        } else {
+            $allowedOrigins = $allowedOriginsConfig ?? ['https://aim.silverday.de'];
+        }
 
         // Check if origin is allowed
         $isOriginAllowed = in_array('*', $allowedOrigins, true) ||
@@ -90,7 +97,7 @@ final class CorsMiddleware implements MiddlewareInterface
         }
 
         return $response
-            ->withHeader('Access-Control-Allow-Origin', $origin ?: '*')
+            ->withHeader('Access-Control-Allow-Origin', $origin)
             ->withHeader('Access-Control-Allow-Credentials', 'true')
             ->withHeader('Access-Control-Expose-Headers', 'X-Request-ID, X-Rate-Limit-Remaining')
             ->withHeader('Vary', 'Origin');
