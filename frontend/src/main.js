@@ -45,35 +45,7 @@ authStore.router = router
 // Restore auth state from localStorage on app initialization
 authStore.restoreAuthState()
 
-// Check if we need to redirect based on auth state
-router.beforeEach((to, from, next) => {
-  // If user is authenticated and going to login page, redirect to dashboard
-  if (authStore.isAuthenticated && to.path === '/login') {
-    next('/dashboard')
-    return
-  }
-
-  // If route requires auth and user is not authenticated, redirect to login
-  if (to.meta.requiresAuth && !authStore.isAuthenticated) {
-    next('/login')
-    return
-  }
-
-  // Check role-based access
-  if (to.meta.requiredRole && authStore.isAuthenticated) {
-    const hasAccess = authStore.hasRole(to.meta.requiredRole)
-    if (!hasAccess) {
-      console.warn('Access denied: insufficient role', {
-        required: to.meta.requiredRole,
-        userRole: authStore.userRole
-      })
-      next('/dashboard') // Redirect to dashboard if insufficient role
-      return
-    }
-  }
-
-  next()
-})
+// Navigation guards are handled in router/index.js
 
 // Add global error handler for unhandled promise rejections
 window.addEventListener('unhandledrejection', (event) => {
