@@ -55,9 +55,19 @@ apiClient.interceptors.response.use(
   async (error) => {
     const originalRequest = error.config
 
-    // Handle 401 errors - attempt token refresh
-    if (error.response?.status === 401 && !originalRequest._retry && authStore) {
+    // Handle 401 errors - attempt token refresh (but avoid infinite loops)
+    if (error.response?.status === 401 && !originalRequest._retry && authStore && authStore.accessToken) {
       originalRequest._retry = true
+
+      // Don't retry if this was already a refresh request (prevent infinite loop)
+      if (originalRequest.url?.includes('/auth/refresh')) {
+        console.warn('Refresh token failed - clearing auth state')
+        authStore.clearAuthState()
+        if (typeof window !== 'undefined' && !window.location.pathname.includes('/login')) {
+          window.location.href = '/login'
+        }
+        return Promise.reject(error)
+      }
 
       try {
         // Attempt to refresh the token
@@ -70,23 +80,15 @@ apiClient.interceptors.response.use(
           // Retry the original request
           return apiClient(originalRequest)
         } else {
-          // Refresh failed - redirect to login
-          authStore.logout()
-
-          // Only redirect if we're not already on the login page
+          // Refresh failed - clear auth state and redirect
+          authStore.clearAuthState()
           if (typeof window !== 'undefined' && !window.location.pathname.includes('/login')) {
-            // Use router if available, otherwise fallback to window.location
-            const router = authStore.router || window?.app?.config?.globalProperties?.$router
-            if (router) {
-              router.push('/login')
-            } else {
-              window.location.href = '/login'
-            }
+            window.location.href = '/login'
           }
         }
       } catch (refreshError) {
         console.error('Token refresh failed:', refreshError)
-        authStore?.logout()
+        authStore.clearAuthState()
 
         // Redirect to login on refresh failure
         if (typeof window !== 'undefined' && !window.location.pathname.includes('/login')) {

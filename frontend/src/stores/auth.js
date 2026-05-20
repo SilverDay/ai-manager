@@ -27,29 +27,41 @@ export const useAuthStore = defineStore('auth', () => {
     mfaRequired.value = false
 
     try {
+      console.log('🔐 Starting login for:', email)
       const response = await authApi.login(email, password)
+      const responseData = response.data.data || response.data // Handle both envelope and direct formats
+      console.log('🔐 Login response:', response.data)
+      console.log('🔐 Actual data:', responseData)
+      console.log('🔐 Response has access_token?', !!responseData.access_token)
+      console.log('🔐 Response has mfa_required?', !!responseData.mfa_required)
 
       // Check if MFA is required
-      if (response.data.mfa_required) {
+      if (responseData.mfa_required) {
+        console.log('🔐 MFA required, setting up challenge')
         mfaRequired.value = true
-        mfaChallenge.value = response.data.challenge_token
+        mfaChallenge.value = responseData.challenge_token
 
         return {
           success: false,
           mfa_required: true,
-          challenge: response.data.challenge_token
+          challenge: responseData.challenge_token
         }
       }
 
       // Successful login
-      accessToken.value = response.data.access_token
-      user.value = response.data.user
+      console.log('🔐 Direct login successful')
+      accessToken.value = responseData.access_token
+      user.value = responseData.user
+      console.log('🔐 Set accessToken:', accessToken.value ? 'YES' : 'NO')
+      console.log('🔐 Set user:', user.value ? user.value.email : 'NO')
+      console.log('🔐 isAuthenticated computed:', !!accessToken.value)
 
       // Store auth state in localStorage for persistence
       persistAuthState()
 
       return { success: true }
     } catch (err) {
+      console.error('🔐 Login failed:', err)
       const errorMessage = getApiErrorMessage(err)
       error.value = errorMessage
 
@@ -72,10 +84,11 @@ export const useAuthStore = defineStore('auth', () => {
 
     try {
       const response = await authApi.verifyMfa(mfaChallenge.value, code)
+      const responseData = response.data.data || response.data // Handle envelope format
 
       // MFA verification successful
-      accessToken.value = response.data.access_token
-      user.value = response.data.user
+      accessToken.value = responseData.access_token
+      user.value = responseData.user
       mfaRequired.value = false
       mfaChallenge.value = null
 

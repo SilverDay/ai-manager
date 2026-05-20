@@ -23,18 +23,28 @@ const handleLogin = async () => {
     return
   }
 
+  console.log('🚀 Login form: Starting login process')
   isSubmitting.value = true
   authStore.clearError()
 
-  const result = await authStore.login(email.value, password.value)
+  try {
+    const result = await authStore.login(email.value, password.value)
+    console.log('🚀 Login form: Auth store result:', result)
 
-  if (result.success) {
-    // Direct login success (tenant users)
-    router.push('/dashboard')
-  } else if (result.mfa_required) {
-    // MFA required (superadmin users)
-    showMfaForm.value = true
-    mfaChallenge.value = result.challenge
+    if (result.success) {
+      console.log('🚀 Login form: Direct login success, navigating to dashboard')
+      // Direct login success (tenant users)
+      router.push('/dashboard')
+    } else if (result.mfa_required) {
+      console.log('🚀 Login form: MFA required, showing MFA form')
+      // MFA required (superadmin users)
+      showMfaForm.value = true
+      mfaChallenge.value = result.challenge
+    } else {
+      console.log('🚀 Login form: Login failed with error:', result.error)
+    }
+  } catch (err) {
+    console.error('🚀 Login form: Unexpected error:', err)
   }
 
   isSubmitting.value = false

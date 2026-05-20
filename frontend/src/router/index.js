@@ -85,6 +85,44 @@ const routes = [
       requiredRole: 'Admin',
     },
   },
+  {
+    path: '/profile',
+    name: 'profile',
+    component: () => import('../views/user/Profile.vue'),
+    meta: {
+      title: 'Profile Settings',
+      requiresAuth: true,
+    },
+  },
+  {
+    path: '/settings',
+    name: 'settings',
+    component: () => import('../views/user/Settings.vue'),
+    meta: {
+      title: 'Account Settings',
+      requiresAuth: true,
+    },
+  },
+  {
+    path: '/superadmin/tenants',
+    name: 'superadmin-tenants',
+    component: () => import('../views/superadmin/TenantManagement.vue'),
+    meta: {
+      title: 'Tenant Management',
+      requiresAuth: true,
+      requiredRole: 'Superadmin',
+    },
+  },
+  {
+    path: '/superadmin/system',
+    name: 'superadmin-system',
+    component: () => import('../views/superadmin/SystemSettings.vue'),
+    meta: {
+      title: 'System Settings',
+      requiresAuth: true,
+      requiredRole: 'Superadmin',
+    },
+  },
 ]
 
 const router = createRouter({
@@ -97,9 +135,16 @@ router.beforeEach(async (to, from, next) => {
   const { useAuthStore } = await import('../stores/auth.js')
   const authStore = useAuthStore()
 
+  console.log('🛣️ Router guard: Navigating to', to.name, 'from', from.name)
+  console.log('🛣️ Router guard: isAuthenticated?', authStore.isAuthenticated)
+  console.log('🛣️ Router guard: accessToken?', !!authStore.accessToken)
+  console.log('🛣️ Router guard: user?', !!authStore.user)
+
   // Check if route requires authentication
   if (to.meta.requiresAuth) {
+    console.log('🛣️ Router guard: Route requires auth')
     if (!authStore.isAuthenticated) {
+      console.log('🛣️ Router guard: Not authenticated, redirecting to login')
       // Redirect to login page
       return next('/login')
     }
