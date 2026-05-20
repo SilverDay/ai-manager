@@ -35,7 +35,7 @@ const navigateHome = () => {
           </div>
           <div class="flex items-center space-x-4">
             <!-- Admin Links -->
-            <div v-if="authStore.user?.role?.name === 'Admin' || authStore.user?.role?.name === 'Superadmin'" class="flex items-center space-x-2">
+            <div v-if="authStore.user?.role_name === 'Admin' || authStore.user?.role_name === 'Superadmin'" class="flex items-center space-x-2">
               <router-link
                 to="/admin/pending-users"
                 class="text-sm font-medium text-primary-600 hover:text-primary-700"

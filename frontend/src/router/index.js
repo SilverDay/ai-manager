@@ -106,7 +106,7 @@ router.beforeEach(async (to, from, next) => {
 
     // Check if route requires specific role
     if (to.meta.requiredRole) {
-      const userRole = authStore.user?.role?.name
+      const userRole = authStore.user?.role_name
       const requiredRole = to.meta.requiredRole
 
       // Allow Superadmin to access any Admin route
