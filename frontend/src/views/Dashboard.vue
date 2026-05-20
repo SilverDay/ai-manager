@@ -34,8 +34,25 @@ const navigateHome = () => {
             </button>
           </div>
           <div class="flex items-center space-x-4">
+            <!-- Admin Links -->
+            <div v-if="authStore.user?.role?.name === 'Admin' || authStore.user?.role?.name === 'Superadmin'" class="flex items-center space-x-2">
+              <router-link
+                to="/admin/pending-users"
+                class="text-sm font-medium text-primary-600 hover:text-primary-700"
+              >
+                Pending Users
+              </router-link>
+              <span class="text-surface-300">|</span>
+              <router-link
+                to="/admin/invitations"
+                class="text-sm font-medium text-primary-600 hover:text-primary-700"
+              >
+                Invitations
+              </router-link>
+            </div>
+
             <span v-if="authStore.user" class="text-sm text-surface-600">
-              Welcome, {{ authStore.user.name }}
+              Welcome, {{ authStore.user.first_name }} {{ authStore.user.last_name }}
             </span>
             <button @click="handleLogout" class="btn btn-secondary">
               {{ t('auth.logout') }}
