@@ -45,13 +45,13 @@ final class RegistrationService
     {
         // Validate email format
         if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-            throw ValidationException::forField('email', 'Invalid email format');
+            throw ValidationException::forField('email', ['Invalid email format']);
         }
 
         // Check password strength
         if (!$this->isValidPassword($password)) {
             throw ValidationException::forField('password',
-                'Password must be at least 12 characters long and contain uppercase, lowercase, numbers, and special characters'
+                ['Password must be at least 12 characters long and contain uppercase, lowercase, numbers, and special characters']
             );
         }
 
@@ -67,7 +67,7 @@ final class RegistrationService
         // Validate domain and get tenant information
         $tenantId = $this->validateDomain($domain);
         if ($tenantId === null) {
-            throw ValidationException::forField('email', 'Email domain is not registered for any organization');
+            throw ValidationException::forField('email', ['Email domain is not registered for any organization']);
         }
 
         // Get tenant domain configuration
@@ -138,22 +138,22 @@ final class RegistrationService
         // Check password strength
         if (!$this->isValidPassword($password)) {
             throw ValidationException::forField('password',
-                'Password must be at least 12 characters long and contain uppercase, lowercase, numbers, and special characters'
+                ['Password must be at least 12 characters long and contain uppercase, lowercase, numbers, and special characters']
             );
         }
 
         // Find and validate invitation
         $invitation = $this->invitationModel->findByToken($token);
         if (!$invitation) {
-            throw ValidationException::forField('token', 'Invalid or expired invitation token');
+            throw ValidationException::forField('token', ['Invalid or expired invitation token']);
         }
 
         if ($invitation['status'] !== 'pending') {
-            throw ValidationException::forField('token', 'Invitation has already been used or revoked');
+            throw ValidationException::forField('token', ['Invitation has already been used or revoked']);
         }
 
         if (new \DateTime($invitation['expires_at']) < new \DateTime()) {
-            throw ValidationException::forField('token', 'Invitation has expired');
+            throw ValidationException::forField('token', ['Invitation has expired']);
         }
 
         // Check if user already exists
@@ -234,7 +234,7 @@ final class RegistrationService
     ): array {
         // Validate email format
         if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-            throw ValidationException::forField('email', 'Invalid email format');
+            throw ValidationException::forField('email', ['Invalid email format']);
         }
 
         // Check if user already exists
@@ -333,7 +333,7 @@ final class RegistrationService
         }
 
         if ($invitation['status'] !== 'pending') {
-            throw ValidationException::forField('invitation', 'Can only resend pending invitations');
+            throw ValidationException::forField('invitation', ['Can only resend pending invitations']);
         }
 
         // Extend expiry by 7 days
