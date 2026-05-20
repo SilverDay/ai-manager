@@ -288,4 +288,27 @@ final class Response
     {
         return $this->headers;
     }
+
+    /**
+     * Create a new response with an additional header (immutable)
+     */
+    public function withHeader(string $name, string $value): self
+    {
+        $newHeaders = $this->headers;
+        $newHeaders[$name] = $value;
+
+        return new self($this->data, $this->statusCode, $newHeaders);
+    }
+
+    /**
+     * Create a new response with multiple headers (immutable)
+     *
+     * @param array<string, string> $headers
+     */
+    public function withHeaders(array $headers): self
+    {
+        $newHeaders = array_merge($this->headers, $headers);
+
+        return new self($this->data, $this->statusCode, $newHeaders);
+    }
 }

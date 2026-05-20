@@ -4,6 +4,18 @@ declare(strict_types=1);
 
 namespace App\Core;
 
+use App\Middleware\CorsMiddleware;
+use App\Middleware\RateLimitMiddleware;
+use App\Middleware\AuthMiddleware;
+use App\Middleware\TenantMiddleware;
+use App\Middleware\RbacMiddleware;
+use App\Services\JwtService;
+use App\Services\RegistrationService;
+use App\Models\User;
+use App\Models\RefreshToken;
+use App\Models\TenantDomain;
+use App\Models\UserInvitation;
+
 final class Router
 {
     /** @var array<string, array<string, RouteDefinition>> */
@@ -11,6 +23,9 @@ final class Router
 
     /** @var array<callable> */
     private array $middleware = [];
+
+    private ?Config $config = null;
+    private ?Database $database = null;
 
     public function get(string $path, array $handler, array $middleware = []): void
     {
@@ -43,6 +58,15 @@ final class Router
     public function addGlobalMiddleware(callable $middleware): void
     {
         $this->middleware[] = $middleware;
+    }
+
+    /**
+     * Set dependencies needed for middleware instantiation
+     */
+    public function setDependencies(Config $config, Database $database): void
+    {
+        $this->config = $config;
+        $this->database = $database;
     }
 
     /**
@@ -225,6 +249,35 @@ final class Router
                         case 'App\Core\Database':
                             $dependencies[] = $database;
                             break;
+                        case JwtService::class:
+                        case 'App\Services\JwtService':
+                            $dependencies[] = new \App\Services\JwtService($config);
+                            break;
+                        case User::class:
+                        case 'App\Models\User':
+                            $dependencies[] = new \App\Models\User($database);
+                            break;
+                        case RefreshToken::class:
+                        case 'App\Models\RefreshToken':
+                            $dependencies[] = new \App\Models\RefreshToken($database);
+                            break;
+                        case RegistrationService::class:
+                        case 'App\Services\RegistrationService':
+                            $dependencies[] = new \App\Services\RegistrationService(
+                                $database,
+                                new \App\Models\User($database),
+                                new \App\Models\TenantDomain($database),
+                                new \App\Models\UserInvitation($database)
+                            );
+                            break;
+                        case TenantDomain::class:
+                        case 'App\Models\TenantDomain':
+                            $dependencies[] = new \App\Models\TenantDomain($database);
+                            break;
+                        case UserInvitation::class:
+                        case 'App\Models\UserInvitation':
+                            $dependencies[] = new \App\Models\UserInvitation($database);
+                            break;
                         default:
                             if (!$parameter->isOptional()) {
                                 throw new \RuntimeException("Cannot resolve dependency: {$typeName}");
@@ -246,10 +299,49 @@ final class Router
      */
     private function resolveMiddleware(string $middlewareName): callable
     {
-        // This will be enhanced when middleware classes are added
-        // For now, just return a no-op middleware
-        return function (Request $request, callable $next) {
-            return $next($request);
+        if (!$this->config || !$this->database) {
+            throw new \LogicException('Dependencies not set on Router. Call setDependencies() first.');
+        }
+
+        // Parse middleware name and parameters
+        $parts = explode(':', $middlewareName);
+        $name = $parts[0];
+        $param = $parts[1] ?? null;
+
+        return match($name) {
+            'cors' => function (Request $request, callable $next) {
+                $middleware = new CorsMiddleware($this->config);
+                return $middleware->handle($request, $next);
+            },
+
+            'rate-limit' => function (Request $request, callable $next) {
+                $middleware = new RateLimitMiddleware($this->config);
+                return $middleware->handle($request, $next);
+            },
+
+            'auth' => function (Request $request, callable $next) {
+                $jwtService = new JwtService($this->config);
+                $userModel = new User($this->database);
+                $middleware = new AuthMiddleware($jwtService, $userModel);
+                return $middleware->handle($request, $next);
+            },
+
+            'tenant' => function (Request $request, callable $next) {
+                $middleware = new TenantMiddleware();
+                return $middleware->handle($request, $next);
+            },
+
+            'rbac' => function (Request $request, callable $next) use ($param) {
+                $role = $param ?? 'any';
+                $middleware = new RbacMiddleware($role);
+                return $middleware->handle($request, $next);
+            },
+
+            default => function (Request $request, callable $next) {
+                // Log unknown middleware for debugging
+                error_log("Unknown middleware: {$middlewareName}");
+                return $next($request);
+            }
         };
     }
 }

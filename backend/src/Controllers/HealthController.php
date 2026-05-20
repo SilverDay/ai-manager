@@ -69,6 +69,11 @@ final class HealthController
                 'query_int' => $request->getQueryParamInt('num'),
                 'query_string' => $request->getQueryParamString('text'),
             ],
+            'headers_debug' => [
+                'all_headers' => $request->getHeaders(),
+                'authorization_header' => $request->getHeader('Authorization'),
+                'authorization_header_alt' => $request->getHeader('authorization'),
+            ],
         ];
 
         return Response::success($data);

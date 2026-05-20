@@ -8,6 +8,10 @@ import './style.css'
 // Import locale messages
 import en from './i18n/locales/en.json'
 
+// Import API client and auth store setup
+import { setAuthStore } from './api/client.js'
+import { useAuthStore } from './stores/auth.js'
+
 // Create i18n instance
 const i18n = createI18n({
   legacy: false,
@@ -29,5 +33,67 @@ app.use(pinia)
 app.use(router)
 app.use(i18n)
 
+// Initialize auth store and API client integration
+const authStore = useAuthStore()
+
+// Set up API client with auth store reference
+setAuthStore(authStore)
+
+// Add router reference to auth store for redirects
+authStore.router = router
+
+// Restore auth state from localStorage on app initialization
+authStore.restoreAuthState()
+
+// Check if we need to redirect based on auth state
+router.beforeEach((to, from, next) => {
+  // If user is authenticated and going to login page, redirect to dashboard
+  if (authStore.isAuthenticated && to.path === '/login') {
+    next('/dashboard')
+    return
+  }
+
+  // If route requires auth and user is not authenticated, redirect to login
+  if (to.meta.requiresAuth && !authStore.isAuthenticated) {
+    next('/login')
+    return
+  }
+
+  // Check role-based access
+  if (to.meta.requiredRole && authStore.isAuthenticated) {
+    const hasAccess = authStore.hasRole(to.meta.requiredRole)
+    if (!hasAccess) {
+      console.warn('Access denied: insufficient role', {
+        required: to.meta.requiredRole,
+        userRole: authStore.userRole
+      })
+      next('/dashboard') // Redirect to dashboard if insufficient role
+      return
+    }
+  }
+
+  next()
+})
+
+// Add global error handler for unhandled promise rejections
+window.addEventListener('unhandledrejection', (event) => {
+  console.error('Unhandled promise rejection:', event.reason)
+
+  // If it's an authentication error, clear auth state
+  if (event.reason?.response?.status === 401) {
+    authStore.clearAuthState()
+    if (router.currentRoute.value.path !== '/login') {
+      router.push('/login')
+    }
+  }
+})
+
 // Mount app
 app.mount('#app')
+
+// Make authStore available globally for debugging
+if (import.meta.env.DEV) {
+  window.authStore = authStore
+  window.router = router
+  console.log('🚀 App initialized with auth store and router available globally for debugging')
+}

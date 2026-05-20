@@ -57,6 +57,33 @@ final class Request
             }
         }
 
+        // Add Content-Type and Content-Length headers that don't have HTTP_ prefix
+        if (isset($_SERVER['CONTENT_TYPE'])) {
+            $headers['content-type'] = $_SERVER['CONTENT_TYPE'];
+        }
+        if (isset($_SERVER['CONTENT_LENGTH'])) {
+            $headers['content-length'] = $_SERVER['CONTENT_LENGTH'];
+        }
+
+        // Handle Authorization header which can be in different locations
+        if (isset($_SERVER['HTTP_AUTHORIZATION'])) {
+            $headers['authorization'] = $_SERVER['HTTP_AUTHORIZATION'];
+        } elseif (isset($_SERVER['REDIRECT_HTTP_AUTHORIZATION'])) {
+            // Sometimes Apache redirects put it here
+            $headers['authorization'] = $_SERVER['REDIRECT_HTTP_AUTHORIZATION'];
+        } elseif (function_exists('apache_request_headers')) {
+            // Try to get it from Apache request headers
+            $apacheHeaders = apache_request_headers();
+            if (is_array($apacheHeaders)) {
+                foreach ($apacheHeaders as $name => $value) {
+                    if (strtolower($name) === 'authorization') {
+                        $headers['authorization'] = $value;
+                        break;
+                    }
+                }
+            }
+        }
+
         // Get raw body
         $body = file_get_contents('php://input') ?: null;
 
@@ -312,5 +339,53 @@ final class Request
     {
         $value = $this->getQueryParam($key, $default);
         return is_string($value) || is_numeric($value) ? (string) $value : $default;
+    }
+
+    /**
+     * Get client IP address
+     */
+    public function getClientIp(): string
+    {
+        // Check for IP from forwarded headers (load balancers, proxies)
+        if (!empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
+            $ips = explode(',', $_SERVER['HTTP_X_FORWARDED_FOR']);
+            return trim($ips[0]);
+        }
+
+        if (!empty($_SERVER['HTTP_X_REAL_IP'])) {
+            return $_SERVER['HTTP_X_REAL_IP'];
+        }
+
+        if (!empty($_SERVER['HTTP_CLIENT_IP'])) {
+            return $_SERVER['HTTP_CLIENT_IP'];
+        }
+
+        return $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+    }
+
+    /**
+     * Get user agent string
+     */
+    public function getUserAgent(): string
+    {
+        return $this->getHeader('User-Agent', $_SERVER['HTTP_USER_AGENT'] ?? 'unknown');
+    }
+
+    /**
+     * Get all cookies
+     *
+     * @return array<string, string>
+     */
+    public function getCookies(): array
+    {
+        return $_COOKIE;
+    }
+
+    /**
+     * Get specific cookie value
+     */
+    public function getCookie(string $name, ?string $default = null): ?string
+    {
+        return $_COOKIE[$name] ?? $default;
     }
 }
